@@ -147,6 +147,13 @@ class Monad m => MonadKIO m where
   inject     :: KeyEvent -> m ()
   -- | Run a shell-command
   shellCmd   :: Text -> m ()
+  -- | Get milliseconds since the last key-press event
+  msSinceLastPress :: m Milliseconds
+  -- | Get the keycode of the last key-press event
+  lastPressKeycode :: m Keycode
+  -- | Check if we are processing events replayed after a hold release.
+  -- Reading this flag also clears it.
+  checkAfterHoldRelease :: m Bool
 
 -- | 'MonadKIO' contains the additional bindings that get added when we are
 -- currently processing a button.

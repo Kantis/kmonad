@@ -12,6 +12,7 @@ where
 import KMonad.Prelude
 
 import UnliftIO.Process (CreateProcess(close_fds), createProcess_, shell)
+import Data.Time.Clock.System (SystemTime, getSystemTime)
 
 import KMonad.Keyboard
 import KMonad.Keyboard.IO
@@ -75,6 +76,11 @@ data AppEnv = AppEnv
   , _keymap     :: Km.Keymap
   , _outHooks   :: Hs.Hooks
   , _outVar     :: TMVar KeyEvent
+
+    -- Idle tracking for timeless homerow mods
+  , _lastPressTime     :: IORef SystemTime
+  , _lastPressCode     :: IORef Keycode
+  , _afterHoldRelease  :: IORef Bool
   }
 makeClassy ''AppEnv
 
@@ -116,7 +122,9 @@ instance (HasAppEnv e, HasAppCfg e, HasLogFunc e) => MonadKIO (RIO e) where
   hold b = do
     sl <- view sluice
     di <- view dispatch
-    if b then Sl.block sl else Sl.unblock sl >>= Dp.rerun di
+    if b then Sl.block sl else do
+      view afterHoldRelease >>= liftIO . flip writeIORef True
+      Sl.unblock sl >>= Dp.rerun di
 
   -- Hooking is performed with the hooks component
   register l h = do
@@ -150,3 +158,20 @@ instance (HasAppEnv e, HasAppCfg e, HasLogFunc e) => MonadKIO (RIO e) where
                    -- impossible for a command to restart KMonad).
                    close_fds   = True
                  }
+
+  -- Idle tracking for timeless homerow mods
+  msSinceLastPress = do
+    ref <- view lastPressTime
+    t0  <- readIORef ref
+    now <- liftIO getSystemTime
+    pure $ tDiff t0 now
+
+  lastPressKeycode = do
+    ref <- view lastPressCode
+    readIORef ref
+
+  checkAfterHoldRelease = do
+    ref <- view afterHoldRelease
+    val <- readIORef ref
+    liftIO $ writeIORef ref False
+    pure val

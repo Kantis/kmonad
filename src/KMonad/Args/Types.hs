@@ -95,6 +95,8 @@ data DefButton
                                            --   as possibly on release
   | KStickyKey Int DefButton               -- ^ Act as if a button is pressed for a period of time
   | KBeforeAfterNext DefButton DefButton   -- ^ Surround a future button in a before and after tap
+  | KTimelessHomerow Int DefButton DefButton Text (Maybe Int) (Maybe Int)
+    -- ^ Timeless homerow mod: tapping-term tap-btn hold-btn hand-name prior-idle quick-tap
   | KTrans                                 -- ^ Transparent button that does nothing
   | KBlock                                 -- ^ Button that catches event
   deriving (Show, Eq, Typeable, Data)
@@ -221,6 +223,7 @@ data KExpr
   | KDefSrc   DefSrc
   | KDefLayer DefLayer
   | KDefAlias DefAlias
+  | KDefHands [(Text, [Keycode])]  -- ^ Hand group definitions for positional hold-tap
   deriving (Show, Eq)
 makeClassyPrisms ''KExpr
 

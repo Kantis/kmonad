@@ -82,6 +82,7 @@ data JoinError
   | InvalidComposeKey
   | LengthMismatch   Text Int Int
   | NotAKeycode      DefButton
+  | MissingHandGroup Text
 
 instance Show JoinError where
   show e = case e of
@@ -113,22 +114,35 @@ instance Show JoinError where
       , "Source length: ", show s, "\n"
       , "Layer length: ", show l ]
     NotAKeycode       b   -> "Encountered non keycode button in 'defsrc': " <> show b
+    MissingHandGroup  t   -> "Reference to non-existent hand group: "      <> T.unpack t
 
 
 instance Exception JoinError
 
 -- | Joining Config
 data JCfg = JCfg
-  { _cmpKey  :: Button  -- ^ How to prefix compose-sequences
+  { _cmpKey   :: Button  -- ^ How to prefix compose-sequences
   , _implArnd :: ImplArnd -- ^ How to handle implicit `around`s
-  , _kes     :: [KExpr] -- ^ The source expresions we operate on
+  , _kes      :: [KExpr] -- ^ The source expresions we operate on
+  , _handDefs :: M.HashMap Keycode Text -- ^ Keycode-to-hand mapping for positional hold-tap
   }
 makeLenses ''JCfg
 
-defJCfg :: [KExpr] ->JCfg
-defJCfg = JCfg
+defJCfg :: [KExpr] -> JCfg
+defJCfg es = JCfg
   (emitB KeyRightAlt)
   IAAround
+  es
+  (buildHandMap es)
+
+-- | Build a keycode-to-hand-name mapping from KDefHands expressions
+buildHandMap :: [KExpr] -> M.HashMap Keycode Text
+buildHandMap es = M.fromList
+  [ (kc, name)
+  | KDefHands groups <- es
+  , (name, kcs)     <- groups
+  , kc              <- kcs
+  ]
 
 -- | Monad in which we join, just Except over Reader
 newtype J a = J { unJ :: ExceptT JoinError (Reader JCfg) a }
@@ -448,6 +462,14 @@ joinButton ns als =
       where f (ms, b) = (fi ms,) <$> go b
     KStepped bs        -> jst $ steppedButton <$> mapM go bs
     KStickyKey s d     -> jst $ stickyKey (fi s) <$> go d
+
+    KTimelessHomerow ms t h hand mbIdle mbQt -> do
+      hm <- view handDefs
+      let isOppositeHand kc = case M.lookup kc hm of
+            Just h' -> h' /= hand
+            Nothing -> True  -- keys not in any hand group always trigger hold
+      jst $ timelessHomerow (fi ms) (fi $ fromMaybe 150 mbIdle) (fi $ fromMaybe 175 mbQt)
+              isOppositeHand <$> go t <*> go h
 
     -- Non-action buttons
     KTrans -> pure Nothing

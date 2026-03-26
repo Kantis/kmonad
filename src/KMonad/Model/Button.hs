@@ -56,6 +56,7 @@ module KMonad.Model.Button
   , tapHoldNextRelease
   , tapNextPress
   , tapHoldNextPress
+  , timelessHomerow
   , tapMacro
   , tapMacroRelease
   , steppedButton
@@ -511,6 +512,60 @@ tapHoldNextPress ms t h mtb = onPress' t $ do
     -- we rethrow this event after holding.
     doHold :: MonadK m => KeyEvent -> m Catch
     doHold e = press h *> hold False *> inject e $> Catch
+
+-- | Create a 'Button' that implements ZMK-style "timeless homerow mods".
+--
+-- This combines four anti-misfire mechanisms:
+-- 1. Prior idle: if pressed within @idleThresh@ ms of the last keypress, immediately tap
+-- 2. Quick tap: if same key pressed again within @qtThresh@ ms, immediately tap
+-- 3. Positional: only opposite-hand key releases trigger hold; same-hand → keep waiting
+-- 4. Balanced: hold triggers on the release (not press) of an opposite-hand key
+timelessHomerow
+  :: Milliseconds        -- ^ Tapping term (timeout for hold fallback)
+  -> Milliseconds        -- ^ Prior idle threshold
+  -> Milliseconds        -- ^ Quick tap threshold
+  -> (Keycode -> Bool)   -- ^ Predicate: is this keycode on the opposite hand?
+  -> Button              -- ^ Tap button
+  -> Button              -- ^ Hold button (modifier)
+  -> Button
+timelessHomerow tappingTerm idleThresh qtThresh isOpposite t h = onPress' t $ do
+  idle    <- msSinceLastPress
+  lastKc  <- lastPressKeycode
+  myKc    <- myBinding
+  isReplay <- checkAfterHoldRelease
+
+  -- Prior-idle check: fast typing → immediate tap
+  -- Quick-tap check: same key repeated fast → immediate tap
+  -- Skip both checks for events replayed after a hold release
+  if not isReplay && (idle < idleThresh || (lastKc == myKc && idle < qtThresh))
+    then tap t
+    else do
+      -- Enter balanced decision mode with positional filtering
+      hold True
+      go tappingTerm []
+  where
+    go :: MonadK m => Milliseconds -> [Keycode] -> m ()
+    go ms' ks = tHookF InputHook ms' onTimeout $ \r -> do
+      p <- matchMy Release
+      let e   = r^.event
+          kc  = e^.keycode
+          rel = isRelease e
+      if
+        -- Own release → tap
+        | p e -> tap t *> hold False $> Catch
+        -- Release of post-pressed opposite-hand key → hold (balanced)
+        | rel && (kc `elem` ks) && isOpposite kc ->
+            press h *> hold False *> inject e $> Catch
+        -- Release of post-pressed same-hand key → ignore, keep waiting
+        | rel && (kc `elem` ks) ->
+            go (ms' - r^.elapsed) ks $> NoCatch
+        -- New press → record keycode, keep waiting
+        | not rel -> go (ms' - r^.elapsed) (kc : ks) $> NoCatch
+        -- Release of pre-pressed key → ignore
+        | otherwise -> go (ms' - r^.elapsed) ks $> NoCatch
+
+    onTimeout :: MonadK m => m ()
+    onTimeout = press h *> hold False
 
 -- | Create a 'Button' that contains a number of delays and 'Button's. As long
 -- as the next press is registered before the timeout, the multiTap descends

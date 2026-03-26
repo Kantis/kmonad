@@ -179,7 +179,12 @@ exprP = paren . choice $
   , sexpr "defsrc"    $ KDefSrc   <$> defsrcP
   , sexpr "deflayer"  $ KDefLayer <$> deflayerP
   , sexpr "defalias"  $ KDefAlias <$> defaliasP
+  , sexpr "defhands"  $ KDefHands <$> many handGroupP
   ]
+
+-- | Parse a hand group: a name followed by a parenthesized list of keycodes
+handGroupP :: Parser (Text, [Keycode])
+handGroupP = (,) <$> word <*> paren (many keycodeP)
 
 --------------------------------------------------------------------------------
 -- $but
@@ -299,6 +304,9 @@ keywordButtons =
   , (,) "cmd-button"               $ KCommand               <$> textP    <*> optional textP
   , (,) "pause"                    $ kPause                 <$> numP
   , (,) "sticky-key"               $ KStickyKey             <$> numP     <*> buttonP
+  , (,) "timeless-homerow"         $ KTimelessHomerow       <$> numP     <*> buttonP <*> buttonP <*> word
+                                                            <*> optarg'P "prior-idle" numP
+                                                            <*> optarg'P "quick-tap" numP
   ]
   ++ map (\(nm,_,btn) -> (nm, btn <$> buttonP <*> buttonP)) implArndButtons
  where

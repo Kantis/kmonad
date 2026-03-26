@@ -18,6 +18,8 @@ where
 
 import KMonad.Prelude
 
+import Data.Time.Clock.System (getSystemTime)
+
 import KMonad.Args
 import KMonad.App.Types
 import KMonad.Keyboard
@@ -96,6 +98,11 @@ initAppEnv cfg = do
   otv <- lift newEmptyTMVarIO
   ohk <- Hs.mkHooks $ toESrc otv
 
+  -- Initialize idle tracking refs
+  lpt <- liftIO $ newIORef =<< getSystemTime
+  lpc <- liftIO $ newIORef KeyReserved
+  ahr <- liftIO $ newIORef False
+
   -- Setup thread to read from outHooks and emit to keysink
   launch_ "emitter_proc" $ do
     -- FIXME: should take output of outHooks
@@ -119,6 +126,10 @@ initAppEnv cfg = do
     , _keymap    = phl
     , _outHooks  = ohk
     , _outVar    = otv
+
+    , _lastPressTime    = lpt
+    , _lastPressCode    = lpc
+    , _afterHoldRelease = ahr
     }
 
 --------------------------------------------------------------------------------
@@ -130,7 +141,7 @@ initAppEnv cfg = do
 
 -- | Trigger the button-action press currently registered to 'Keycode'
 pressKey :: (HasAppEnv e, HasLogFunc e, HasAppCfg e) => Keycode -> RIO e ()
-pressKey c =
+pressKey c = do
   view keymap >>= flip Km.lookupKey c >>= \case
 
     -- If the keycode does not occur in our keymap
@@ -155,6 +166,11 @@ pressKey c =
               Nothing -> pure ()
               Just a  -> runAction a
             pure Catch
+
+  -- Update idle tracking state AFTER button logic reads it
+  now <- liftIO getSystemTime
+  view lastPressTime >>= liftIO . flip writeIORef now
+  view lastPressCode >>= liftIO . flip writeIORef c
 
 --------------------------------------------------------------------------------
 -- $loop
