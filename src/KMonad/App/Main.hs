@@ -102,6 +102,7 @@ initAppEnv cfg = do
   lpt <- liftIO $ newIORef =<< getSystemTime
   lpc <- liftIO $ newIORef KeyReserved
   ahr <- liftIO $ newIORef False
+  amo <- liftIO $ newIORef mempty
 
   -- Setup thread to read from outHooks and emit to keysink
   launch_ "emitter_proc" $ do
@@ -130,6 +131,7 @@ initAppEnv cfg = do
     , _lastPressTime    = lpt
     , _lastPressCode    = lpc
     , _afterHoldRelease = ahr
+    , _activeModifiers  = amo
     }
 
 --------------------------------------------------------------------------------

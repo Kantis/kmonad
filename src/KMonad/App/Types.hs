@@ -13,6 +13,7 @@ import KMonad.Prelude
 
 import UnliftIO.Process (CreateProcess(close_fds), createProcess_, shell)
 import Data.Time.Clock.System (SystemTime, getSystemTime)
+import qualified RIO.Set as S
 
 import KMonad.Keyboard
 import KMonad.Keyboard.IO
@@ -81,6 +82,7 @@ data AppEnv = AppEnv
   , _lastPressTime     :: IORef SystemTime
   , _lastPressCode     :: IORef Keycode
   , _afterHoldRelease  :: IORef Bool
+  , _activeModifiers   :: IORef (S.Set Keycode)
   }
 makeClassy ''AppEnv
 
@@ -109,9 +111,14 @@ instance MonadK (RIO KEnv) where
   myBinding = view (bEnv.binding)
 
 instance (HasAppEnv e, HasAppCfg e, HasLogFunc e) => MonadKIO (RIO e) where
-  -- Emitting with the keysink
+  -- Emitting with the keysink, tracking modifier state
   emit e = do
     logDebug $ "Scheduling emit: " <> display e
+    when (isModifierKc $ e^.keycode) $ do
+      ref <- view activeModifiers
+      liftIO $ modifyIORef' ref $ case e^.switch of
+        Press   -> S.insert (e^.keycode)
+        Release -> S.delete (e^.keycode)
     view outVar >>= atomically . flip putTMVar e
   -- emit e = view keySink >>= flip emitKey e
 
@@ -175,3 +182,16 @@ instance (HasAppEnv e, HasAppCfg e, HasLogFunc e) => MonadKIO (RIO e) where
     val <- readIORef ref
     liftIO $ writeIORef ref False
     pure val
+
+  getActiveModifiers = do
+    ref <- view activeModifiers
+    readIORef ref
+
+-- | Check if a keycode is a modifier key
+isModifierKc :: Keycode -> Bool
+isModifierKc kc = kc `elem`
+  [ KeyLeftShift, KeyRightShift
+  , KeyLeftCtrl,  KeyRightCtrl
+  , KeyLeftAlt,   KeyRightAlt
+  , KeyLeftMeta,  KeyRightMeta
+  ]

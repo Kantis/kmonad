@@ -71,6 +71,7 @@ import KMonad.Keyboard
 import KMonad.Util
 
 import qualified RIO.HashSet as S
+import qualified RIO.Set as Set
 
 --------------------------------------------------------------------------------
 -- $but
@@ -540,32 +541,47 @@ timelessHomerow tappingTerm idleThresh qtThresh isOpposite t h = onPress' t $ do
   if not isReplay && (idle < idleThresh || (lastKc == myKc && idle < qtThresh))
     then tap t
     else do
+      -- Snapshot currently held modifiers so we can restore them on tap
+      mods <- getActiveModifiers
       -- Enter balanced decision mode with positional filtering
       hold True
-      go tappingTerm []
+      go tappingTerm [] mods
   where
-    go :: MonadK m => Milliseconds -> [Keycode] -> m ()
-    go ms' ks = tHookF InputHook ms' onTimeout $ \r -> do
+    go :: MonadK m => Milliseconds -> [Keycode] -> Set.Set Keycode -> m ()
+    go ms' ks mods = tHookF InputHook ms' onTimeout $ \r -> do
       p <- matchMy Release
       let e   = r^.event
           kc  = e^.keycode
           rel = isRelease e
       if
-        -- Own release → tap
-        | p e -> tap t *> hold False $> Catch
+        -- Own release → tap (restoring any modifiers released during hold)
+        | p e -> tapWithMods mods t *> hold False $> Catch
         -- Release of post-pressed opposite-hand key → hold (balanced)
         | rel && (kc `elem` ks) && isOpposite kc ->
             press h *> hold False *> inject e $> Catch
         -- Release of post-pressed same-hand key → ignore, keep waiting
         | rel && (kc `elem` ks) ->
-            go (ms' - r^.elapsed) ks $> NoCatch
+            go (ms' - r^.elapsed) ks mods $> NoCatch
         -- New press → record keycode, keep waiting
-        | not rel -> go (ms' - r^.elapsed) (kc : ks) $> NoCatch
+        | not rel -> go (ms' - r^.elapsed) (kc : ks) mods $> NoCatch
         -- Release of pre-pressed key → ignore
-        | otherwise -> go (ms' - r^.elapsed) ks $> NoCatch
+        | otherwise -> go (ms' - r^.elapsed) ks mods $> NoCatch
 
     onTimeout :: MonadK m => m ()
     onTimeout = press h *> hold False
+
+-- | Tap a button, temporarily re-pressing any modifiers that were held at
+-- snapshot time but have since been released.
+tapWithMods :: MonadK m => Set.Set Keycode -> Button -> m ()
+tapWithMods snapshotMods btn = do
+  currentMods <- getActiveModifiers
+  let releasedMods = Set.difference snapshotMods currentMods
+  -- Re-press modifiers that were released during balanced mode
+  mapM_ (emit . mkPress) (Set.toList releasedMods)
+  -- Tap the button
+  tap btn
+  -- Re-release the temporarily re-pressed modifiers
+  mapM_ (emit . mkRelease) (Set.toList releasedMods)
 
 -- | Create a 'Button' that contains a number of delays and 'Button's. As long
 -- as the next press is registered before the timeout, the multiTap descends

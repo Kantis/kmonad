@@ -60,6 +60,8 @@ where
 
 import KMonad.Prelude hiding (timeout)
 
+import qualified RIO.Set as S
+
 import KMonad.Keyboard
 import KMonad.Util
 
@@ -154,6 +156,8 @@ class Monad m => MonadKIO m where
   -- | Check if we are processing events replayed after a hold release.
   -- Reading this flag also clears it.
   checkAfterHoldRelease :: m Bool
+  -- | Get the set of modifier keycodes currently pressed (as seen by the OS)
+  getActiveModifiers :: m (S.Set Keycode)
 
 -- | 'MonadKIO' contains the additional bindings that get added when we are
 -- currently processing a button.
